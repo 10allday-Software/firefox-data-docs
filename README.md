@@ -1,6 +1,6 @@
-# Firefox Data Documentation
+# Mozilla Data Documentation
 
-[![Linux Build Status](https://travis-ci.org/mozilla/firefox-data-docs.svg?branch=master)](https://travis-ci.org/mozilla/firefox-data-docs)
+[![Build Status](https://github.com/mozilla/data-docs/workflows/Build/badge.svg)](https://github.com/mozilla/data-docs/actions?query=workflow%3ABuild)
 
 This document is intended to help Mozilla's developers and data scientists
 analyze and interpret the data gathered by the Firefox Telemetry system.
@@ -14,6 +14,11 @@ To learn more about what data Firefox collects and the choices you can make
 as a user, please see the [Firefox Privacy Notice](https://www.mozilla.org/en-US/privacy/firefox/).
 
 The rendered documentation is hosted at [https://docs.telemetry.mozilla.org/](https://docs.telemetry.mozilla.org/).
+
+Issues for this documentation are [tracked in Bugzilla][docszilla] ([file a bug]).
+
+[docszilla]: https://bugzilla.mozilla.org/buglist.cgi?product=Data%20Platform%20and%20Tools&component=Documentation%20and%20Knowledge%20Repo%20%28RTMO%29&resolution=---
+[file a bug]: https://bugzilla.mozilla.org/enter_bug.cgi?component=Documentation%20and%20Knowledge%20Repo%20(RTMO)&product=Data%20Platform%20and%20Tools
 
 ## Building the Documentation
 
@@ -48,8 +53,45 @@ mdbook-dtmo serve
 The complete documentation for the mdBook toolchain is available online at <https://rust-lang.github.io/mdBook/>.
 If you run into any problems, please [let us know](https://docs.telemetry.mozilla.org/concepts/getting_help.html). We are happy to change the tooling to make it as much fun as possible to write.
 
-This documentation has some automatic checks for spelling and link validity in continuous integration. See the respective sections in the [contributing article](https://docs.telemetry.mozilla.org/meta/contributing.html) for more information.
+### Spell checking
+
+Articles should use proper spelling, and pull requests will be automatically checked for spelling
+errors.
+
+Technical articles often contain words that are not recognized by common dictionaries, if this
+happens you may either put specialized terms in `code blocks`, or you may add an exception to
+the `.spelling` file in the code repository.
+
+For things like dataset names or field names, `code blocks` should be preferred. Things like
+project names or common technical terms should be added to the `.spelling` file.
+
+The [markdown-spell-check](https://www.npmjs.com/package/markdown-spellcheck) package checks spelling as part of the build process. To run it locally, install [node.js](https://nodejs.org/en/) (if not already installed) and run `npm install` at the root of the repository. Then run the `scripts/link_check.sh` script.
+
+You may also remove the `--report` parameter to begin an interactive fixing session. In this
+case, it is highly recommended to also add the `--no-suggestions` parameter, which greatly
+speeds things up.
+
+### Link checking
+
+Any web links should be valid. A dead link might not be your fault, but you will earn a lot of good karma by fixing a dead link!
+
+The [markdown-link-check](https://www.npmjs.com/package/markdown-link-check) package checks links as part of the build process. Note that dead links do not fail the build: links often go dead for all sorts of reasons, and making it a required check constantly caused otherwise-fine pull requests to appear broken. Still, you should check the status of this check yourself when submitting a pull request: you can do this by looking at the Travis CI status after submitting it.
+
+To run link checking locally, run the installation steps [described for spell checking](#spell-checking) if you haven't already, then run the `scripts/link_check.sh` script.
+
+### Markdown formatting
+
+We use [prettier](https://prettier.io) to ensure a consistent formatting style in our markdown.
+To reduce friction, this is not a required check but running it on the files
+you're modifying before submission is highly appreciated!
+Most editors can be configured to run prettier automatically,
+see for example the
+[Prettier Plugin for VSCode](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode).
+
+To run prettier locally on the entire repository, run the installation steps
+[described for spell checking](#spell-checking) if you haven't already, then
+run the `scripts/prettier_fix.sh` script.
 
 ## Contributing
 
-See [contributing](https://docs.telemetry.mozilla.org/meta/contributing.html) for detailed information on how to make additions or changes to the documentation.
+See [contributing](https://docs.telemetry.mozilla.org/contributing/index.html) for detailed information on making changes to the documentation.

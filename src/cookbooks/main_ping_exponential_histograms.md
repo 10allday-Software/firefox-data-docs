@@ -1,10 +1,14 @@
 # Visualizing Percentiles of a Main Ping Exponential Histogram
 
-[GLAM](https://glam-stage.bespoke.nonprod.dataops.mozgcp.net/) is great if you want to check out the behaviour of a histogram over a large population across a curated set of dimensions, but what if you have a follow-up question that doesn't fit into its UI model? This tutorial will go into the guts of how to reproduce a GLAM-like view using `sql.telemetry.mozilla.org` (STMO), along with some suggestions on how to dig deeper.
+[GLAM](https://glam.telemetry.mozilla.org/) is great if you want to check out the behaviour of a histogram over a large population across a curated set of dimensions, but what if you have a follow-up question that doesn't fit into its UI model? This tutorial will go into the guts of how to reproduce a GLAM-like view using `sql.telemetry.mozilla.org` (STMO), along with some suggestions on how to dig deeper.
 
 This tutorial tries to build up an understanding and intuition of how things work on a low-level before it gets to its main act of reproducing GLAM. If you don't care about the details, you can probably skip the earlier sections in this document.
 
-Assumptions: You have some idea of what a histogram is (if not, the [Wikipedia article](https://en.wikipedia.org/wiki/Histogram) is a great place to start), have at least skimmed over [the Firefox documentation on histograms](https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/collection/histograms.html), and have read [the introduction to STMO](../tools/stmo.md).
+Assumptions:
+
+- You have some idea of what a histogram is (if not, the [Wikipedia article](https://en.wikipedia.org/wiki/Histogram) is a great place to start), have at least skimmed over [the Firefox documentation on histograms](https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/collection/histograms.html)
+- You have read [the introduction to STMO](../tools/stmo.md).
+- You understand the [main ping tables](../datasets/main_ping_tables.md) (`telemetry.main_1pct` and `telemetry.main_nightly`).
 
 ## Table of Contents
 
@@ -32,10 +36,10 @@ As of this writing, each main ping histogram is encoded as a JSON string inside 
 SELECT
   payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS AS histogram_json,
 FROM
-  telemetry.main
+  telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels
 WHERE
   sample_id = 42
-  AND normalized_channel = 'nightly'
+  AND normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
   AND DATE(submission_timestamp) = '2020-04-20'
   AND payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS IS NOT NULL
 LIMIT
@@ -52,19 +56,21 @@ Running this query on STMO, we get the following output:
 | `{"bucket_count":20,"histogram_type":0,"sum":19145,"range":[1,1000],"values":{"237":0,"340":1,"1000":1}}` |
 | `{"bucket_count":20,"histogram_type":0,"sum":1996,"range":[1,1000],"values":{"698":0,"1000":1}}`          |
 
-In this representation, `bucket_count`, `histogram_type`, and `range` represent the number of buckets, the histogram type (as an index: 0 means exponential), and the range of possible values. `values` represents the number of instances in each of the buckets while `sum` represents the sum total of all histogram values recorded.
+In this representation, `bucket_count` and `range` represent the number of buckets and the range of possible values. `histogram_type` is an enumerated value that describes whether the histogram has linear, exponential, or categorical buckets; the values are [defined in the Firefox source code](https://searchfox.org/mozilla-central/rev/0c682c4f01442c3de0fa6cd286e9cadc8276b45f/toolkit/components/telemetry/core/nsITelemetry.idl#18-32).
+`values` represents the number of instances in each of the buckets while `sum` represents the sum total of all histogram values recorded.
+Note how the first column has one bucket with no elements in it (the "165" bucket), this is because Firefox adds a zero-count bucket on the left and right edges of the data (unless that would be one of the extremes and that bucket already has a count in it, as is the case for the "1000" bucket in the last two examples).
 
-In general, it is best not to rely on this representation of the histogram in production code (it is quite likely to change in the future). Instead, use the [`json_extract_histogram`](https://github.com/mozilla/bigquery-etl/blob/master/udf/json_extract_histogram.sql) user-defined-function (UDF) and extract out the fields you need: for example, to just get the `sum` for all the histograms above, you could modify the query above to something like:
+In general, it is best not to rely on this representation of the histogram in production code (it is quite likely to change in the future). Instead, use the [`mozfun.hist.extract`](https://mozilla.github.io/bigquery-etl/mozfun/hist/#extract) user-defined-function (UDF) and extract out the fields you need: for example, to just get the `sum` for all the histograms above, you could modify the query above to something like:
 
 ```sql
 WITH intermediate AS (
   SELECT
-    udf.json_extract_histogram(payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS) AS histogram,
+    mozfun.hist.extract(payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS) AS histogram,
   FROM
-    telemetry.main
+    telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels
   WHERE
     sample_id = 42
-    AND normalized_channel = 'nightly'
+    AND normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
     AND DATE(submission_timestamp) = '2020-04-20'
     AND payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS IS NOT NULL
   LIMIT
@@ -93,24 +99,24 @@ Obviously this by itself is not particularly useful or meaningful - generally we
 
 ## Getting percentiles from a set of histograms
 
-Often, questions around histograms are framed as "what's the 99th percentile?" -- that is, what is the _maximum_ value that 99% of users experience: this helps give perspective on data which may have a number of weird outliers (a.k.a the _Bill Gates walks into a bar and everyone inside becomes a millionaire_ effect). Let's take an initial stab of grabbing some percentiles of the data we were looking at earlier using the [`histogram_merge`](https://github.com/mozilla/bigquery-etl/blob/master/udf/histogram_merge.sql) and [`histogram_percentiles`](https://github.com/mozilla/bigquery-etl/blob/master/udf/histogram_percentiles.sql) UDFs:
+Often, questions around histograms are framed as "what's the 99th percentile?" -- that is, what is the _maximum_ value that 99% of users experience: this helps give perspective on data which may have a number of weird outliers (a.k.a the _Bill Gates walks into a bar and everyone inside becomes a millionaire_ effect). Let's take an initial stab of grabbing some percentiles of the data we were looking at earlier using the [`mozfun.hist.merge`](https://mozilla.github.io/bigquery-etl/mozfun/hist/#merge) and [`mozfun.hist.percentiles`](https://mozilla.github.io/bigquery-etl/mozfun/hist/#percentiles) UDFs:
 
 ```sql
 WITH merged_histogram AS (
   SELECT
-    udf.histogram_merge(
-      ARRAY_AGG(udf.json_extract_histogram(payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS))
+    mozfun.hist.merge(
+      ARRAY_AGG(mozfun.hist.extract(payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS))
     ) AS spinner_visible_ms,
   FROM
-    telemetry.main
+    telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels
   WHERE
-    application.channel = 'nightly'
+    normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
     AND normalized_os = 'Windows'
     AND DATE(submission_timestamp) = '2020-04-20'
 ),
 percentiles AS (
   SELECT
-    udf.histogram_percentiles(spinner_visible_ms, [.05, .25, .5, .75, .95]) AS percentile_nested
+    mozfun.hist.percentiles(spinner_visible_ms, [.05, .25, .5, .75, .95]) AS percentile_nested
   FROM
     merged_histogram
 )
@@ -137,7 +143,7 @@ Which gives us this set of results:
 
 So we see for this set of results that 95th percentile is `1000ms`, the 75th percentile is `698ms`, and so on.
 
-There's a bit of intermediate-to-advanced SQL in the above query, due to the fact that the `histogram_percentiles` UDF returns an _array_ of results in a column (rather than a full-blown table) -- we wrangle the results into something we can handle using the [`UNNEST`](https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#unnest) operator combined with a cross-join at the end. If you don't immediately understand this, don't worry: it's just an implementation detail.
+There's a bit of intermediate-to-advanced SQL in the above query, due to the fact that the `mozfun.hist.percentiles` UDF returns an _array_ of results in a column (rather than a full-blown table) -- we wrangle the results into something we can handle using the [`UNNEST`](https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#unnest) operator combined with a cross-join at the end. If you don't immediately understand this, don't worry: it's just an implementation detail.
 
 ## Viewing change of percentiles over time
 
@@ -146,27 +152,25 @@ Knowing the approximate distribution of results on a given day is sort of intere
 We can do this simply by _grouping by_ the build id field, and then merging the histograms corresponding to each:
 
 ```sql
-DECLARE four_twenty DEFAULT DATE('2020-04-20');
-
 WITH per_build_day AS (
   SELECT
     PARSE_DATETIME("%Y%m%d%H%M%S", application.build_id) AS build_id,
     KEY,
     SUM(value) AS value,
   FROM
-    telemetry.main,
+    telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels,
     UNNEST(
-      udf.json_extract_histogram(
+      mozfun.hist.extract(
         payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS
       ).VALUES
     )
   WHERE
-    application.channel = 'nightly'
+    normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
     AND normalized_os = 'Windows'
-    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(four_twenty, INTERVAL 2 WEEK))
-    AND application.build_id <= FORMAT_DATE("%Y%m%d", four_twenty)
-    AND DATE(submission_timestamp) >= DATE_SUB(four_twenty, INTERVAL 2 WEEK)
-    AND DATE(submission_timestamp) <= four_twenty
+    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(CURRENT_DATE, INTERVAL 2 WEEK))
+    AND application.build_id <= FORMAT_DATE("%Y%m%d", CURRENT_DATE)
+    AND DATE(submission_timestamp) >= DATE_SUB(CURRENT_DATE, INTERVAL 2 WEEK)
+    AND DATE(submission_timestamp) <= CURRENT_DATE
   GROUP BY
     KEY,
     build_id
@@ -188,7 +192,7 @@ FROM
   per_build_day_as_struct
 CROSS JOIN
   UNNEST(
-    udf.histogram_percentiles(
+    mozfun.hist.percentiles(
       spinner_visible_ms,
       [.05, .25, .5, .75, .95]
     )
@@ -211,33 +215,31 @@ The example above basically created one _giant_ histogram and then gathered the 
 
 A solution used by GLAM is to give each client "one vote": that is, the aggregate histogram for a client over a day must sum up to one. Even in the extreme case where all tab spinner measurements fall between `658ms` and `1000ms` (the range of the highest bucket), the _maximum_ number for that bucket is just "1".
 
-We can reproduce this approach by using the [`histogram_normalize`](https://github.com/mozilla/bigquery-etl/blob/master/udf/histogram_normalize.sql) UDF, which explicitly takes a set of histograms and makes sure that the values for each one sum up to exactly one:
+We can reproduce this approach by using the [`mozfun.hist.normalize`](https://mozilla.github.io/bigquery-etl/mozfun/hist/#normalize) UDF, which explicitly takes a set of histograms and makes sure that the values for each one sum up to exactly one:
 
 ```sql
-DECLARE four_twenty DEFAULT DATE('2020-04-20');
-
 WITH per_build_client_day AS (
   SELECT
     PARSE_DATETIME("%Y%m%d%H%M%S", application.build_id) AS build_id,
     client_id,
-    udf.histogram_normalize(
-      udf.histogram_merge(
+    mozfun.hist.normalize(
+      mozfun.hist.merge(
         ARRAY_AGG(
-          udf.json_extract_histogram(
+          mozfun.hist.extract(
             payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS
           )
         )
       )
     ) AS tab_switch_visible_ms
   FROM
-    telemetry.main
+    telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels
   WHERE
-    application.channel = 'nightly'
+    normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
     AND normalized_os = 'Windows'
-    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(four_twenty, INTERVAL 14 DAY))
-    AND application.build_id <= FORMAT_DATE("%Y%m%d", four_twenty)
-    AND DATE(submission_timestamp) >= DATE_SUB(four_twenty, INTERVAL 14 DAY)
-    AND DATE(submission_timestamp) <= four_twenty
+    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY))
+    AND application.build_id <= FORMAT_DATE("%Y%m%d", CURRENT_DATE)
+    AND DATE(submission_timestamp) >= DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY)
+    AND DATE(submission_timestamp) <= CURRENT_DATE
   GROUP BY
     build_id,
     client_id
@@ -266,7 +268,7 @@ as_struct AS (
 percentiles AS (
   SELECT
     build_id,
-    udf.histogram_percentiles(
+    mozfun.hist.percentiles(
       spinner_visible_long_ms,
       [.05, .25, .5, .75, .95]
     ) AS percentile_nested
@@ -285,7 +287,7 @@ CROSS JOIN
 
 [link](https://sql.telemetry.mozilla.org/queries/71489/source)
 
-You'll notice this query groups by `client_id` in addition to `build_id` before `histogram_normalize`. Grouping by `client_id` gives each user equal representation and prevents "power users" from skewing the result.
+You'll notice this query groups by `client_id` in addition to `build_id` before `mozfun.hist.normalize`. Grouping by `client_id` gives each user equal representation and prevents "power users" from skewing the result.
 
 In any case, the result of this query is this graph:
 
@@ -300,31 +302,29 @@ OK, so we've reproduced GLAM, but that isn't particularly exciting in and of its
 We can filter our query to _just_ that group of users by adding a `AND normalized_os_version="6.1"` clause to our query above:
 
 ```sql
-DECLARE four_twenty DEFAULT DATE('2020-04-20');
-
 WITH per_build_client_day AS (
   SELECT
     PARSE_DATETIME("%Y%m%d%H%M%S", application.build_id) AS build_id,
     client_id,
-    udf.histogram_normalize(
-      udf.histogram_merge(
+    mozfun.hist.normalize(
+      mozfun.hist.merge(
         ARRAY_AGG(
-          udf.json_extract_histogram(
+          mozfun.hist.extract(
             payload.histograms.FX_TAB_SWITCH_SPINNER_VISIBLE_MS
           )
         )
       )
     ) AS tab_switch_visible_ms
   FROM
-    telemetry.main
+    telemetry.main_nightly -- Use telemetry.main_1pct for a 1% sample across channels
   WHERE
-    application.channel = 'nightly'
+    normalized_channel = 'nightly' -- Only technically necessary if using telemetry.main or telemetry.main_1pct (see above)
     AND normalized_os = 'Windows'
     AND normalized_os_version = "6.1"
-    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(four_twenty, INTERVAL 14 DAY))
-    AND application.build_id <= FORMAT_DATE("%Y%m%d", four_twenty)
-    AND DATE(submission_timestamp) >= DATE_SUB(four_twenty, INTERVAL 14 DAY)
-    AND DATE(submission_timestamp) <= four_twenty
+    AND application.build_id > FORMAT_DATE("%Y%m%d", DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY))
+    AND application.build_id <= FORMAT_DATE("%Y%m%d", CURRENT_DATE)
+    AND DATE(submission_timestamp) >= DATE_SUB(CURRENT_DATE, INTERVAL 14 DAY)
+    AND DATE(submission_timestamp) <= CURRENT_DATE
   GROUP BY
     build_id,
     client_id
@@ -353,7 +353,7 @@ as_struct AS (
 percentiles AS (
   SELECT
     build_id,
-    udf.histogram_percentiles(
+    mozfun.hist.percentiles(
       spinner_visible_long_ms,
       [.05, .25, .5, .75, .95]
     ) AS percentile_nested

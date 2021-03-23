@@ -1,5 +1,5 @@
 [book]
-title = "Firefox Data Documentation"
+title = "Mozilla Data Documentation"
 
 [build]
 create-missing = false
@@ -12,10 +12,20 @@ renderer = ["html"]
 command = "mdbook-toc"
 
 [output.html]
+mathjax-support = true
 additional-css = ["dtmo.css", "mermaid.css"]
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
-git-repository-url = "https://github.com/mozilla/firefox-data-docs"
+git-repository-url = "https://github.com/mozilla/data-docs"
 google-analytics = "UA-104326577-1"
+git-branch = "main"
+
+[output.html.redirect]
+"/datasets/mozetl/search_aggregates/reference.html" = "/datasets/search/search_aggregates/reference.html"
+"/datasets/mozetl/search_clients_daily/reference.html" = "/datasets/search/search_clients_daily/reference.html"
+"/datasets/mozetl/search_clients_last_seen/reference.html" = "/datasets/search/search_clients_last_seen/reference.html"
+"/datasets/mozetl/client_ltv/reference.html" = "/datasets/search/client_ltv/reference.html"
+"/cookbooks/bigquery-airflow.html" = "/cookbooks/scheduling_queries.html"
+"/concepts/glean/accessing_glean_data.html" = "/cookbooks/accessing_glean_data.html"
 
 [preprocessor.open-on-gh]
 command = "mdbook-open-on-gh"

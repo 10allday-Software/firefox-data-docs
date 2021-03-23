@@ -23,7 +23,7 @@ baseline amount of activity.
 ## Scheduling
 
 This dataset is scheduled on Airflow
-([source](https://github.com/mozilla/telemetry-airflow/blob/f6a1e87c727df70aa12d9e37fc0c214922919e65/dags/main_summary.py#L398)).
+([source](https://github.com/mozilla/bigquery-etl/blob/ad84a15d580333b41d36cfe8331e51238f3bafa1/dags/bqetl_search.py#L52)).
 
 ## Schema
 
@@ -84,7 +84,6 @@ root
 # Code Reference
 
 The `search_clients_last_seen` job is
-[defined in `bigquery-etl`](https://github.com/mozilla/bigquery-etl/blob/master/sql/search_derived/search_clients_last_seen_v1/query.sql)
-
+[defined in `bigquery-etl`](https://github.com/mozilla/bigquery-etl/blob/master/sql/moz-fx-data-shared-prod/search_derived/search_clients_last_seen_v1/query.sql)
 
 [search data documentation]: ../../search.md

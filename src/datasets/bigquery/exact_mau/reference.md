@@ -18,7 +18,7 @@ aggregates across arbitrary slices of those dimensions.
 The tables follow a consistent methodology which is intended as a standard
 across Mozilla for MAU analysis going forward.
 
-Note that this data model is used in the [Growth & Usage Dashboard (GUD)](https://growth-stage.bespoke.nonprod.dataops.mozgcp.net/) and that some of this documentation is replicated in the [GUD documentation](https://mozilla.github.io/gud).
+Note that this data model is used in the [Growth & Usage Dashboard (GUD)](https://gud.telemetry.mozilla.org/) and that some of this documentation is replicated in the [GUD documentation](https://mozilla.github.io/gud).
 
 ## Table of Contents
 
@@ -28,7 +28,7 @@ Note that this data model is used in the [Growth & Usage Dashboard (GUD)](https:
 
 ## Metric
 
-A metric is anything want to (and can) measure.  In order for a metric to be
+A metric is anything want to (and can) measure. In order for a metric to be
 calculated, a _usage criterion_ and a _slice_ must be specified. The metric
 will produce a single value per day, summarizing data:
 
@@ -36,7 +36,7 @@ will produce a single value per day, summarizing data:
 - for all users (whatever notion of user makes sense for the data, generally profiles) in a particular sub-population
 - where the sub-population will include users that meet the specified usage criteria and are in the specified slice.
 
-A simple _usage criterion_ is "All Desktop Activity", which includes all Firefox Desktop users that we have any data (telemetry ping) for on the day in question.  The simplest slice is "All" which places no restrictions on the sub-population.
+A simple _usage criterion_ is "All Desktop Activity", which includes all Firefox Desktop users that we have any data (telemetry ping) for on the day in question. The simplest slice is "All" which places no restrictions on the sub-population.
 
 For example, the metric "Daily Active Users (DAU)" with usage criteria "All Desktop Activity" and slice "All" involves summarizing data on all users of Firefox Desktop over a single day.
 
@@ -46,7 +46,7 @@ Active user counts must always be calculated in reference to some specific
 _usage criterion_, a binary condition we use to determine whether a given
 user should be considered "active" in a given product or feature.
 It may be something simple like "All Desktop Activity" (as above) or,
-similarly, "All Mobile Activity".  It may also be something more specific like
+similarly, "All Mobile Activity". It may also be something more specific like
 "Desktop Visited 5 URI" corresponding to calculation of
 [aDAU](../../../cookbooks/active_dau.md).
 
@@ -66,7 +66,7 @@ restrictions on any dimension.
 Note there are some complexities here:
 
 - Firstly, a dimension may be scalar and need to be suitably bucketed (instead of every possible profile age being a unique slice element, maybe we prefer to group users between 12 and 16 months old into a single slice element); likewise we may need to use normalized versions of string fields
-- Secondly, we require that dimensions be non-overlapping, especially for metrics calculated over multiple days of user activity.  In a given day, a profile may be active in multiple countries, but we aggregate that to a single value by taking the most frequent value seen in that day, breaking ties by taking the value that occurs last. In a given month, the assigned country may change from day to day; we use the value from the most recent active day up to the day we're calculating usage for.
+- Secondly, we require that dimensions be non-overlapping, especially for metrics calculated over multiple days of user activity. In a given day, a profile may be active in multiple countries, but we aggregate that to a single value by taking the most frequent value seen in that day, breaking ties by taking the value that occurs last. In a given month, the assigned country may change from day to day; we use the value from the most recent active day up to the day we're calculating usage for.
 
 A slice is expressed as a set of conditions in `WHERE` or `GROUP BY` clauses
 when querying Exact MAU tables.
@@ -89,7 +89,7 @@ SELECT
     submission_date,
     SUM(mau) AS mau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
+    `mozdata.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
 GROUP BY
     submission_date
 ORDER BY
@@ -104,7 +104,7 @@ SELECT
     submission_date,
     SUM(mau) AS mau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
+    `mozdata.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
 WHERE
     country = 'US'
     AND campaign = 'whatsnew'
@@ -114,17 +114,17 @@ ORDER BY
     submission_date
 ```
 
-Perhaps we want to compare MAU as above to  [aDAU](../../../cookbooks/active_dau.md)
+Perhaps we want to compare MAU as above to [aDAU](../../../cookbooks/active_dau.md)
 over the same slice. The column `visited_5_uri_dau` gives DAU as calculated
 with the "Desktop Visited 5 URI" usage criterion, corresponding to aDAU:
 
-```
+```sql
 SELECT
     submission_date,
     SUM(mau) AS mau,
     SUM(visited_5_uri_dau) AS adau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
+    `mozdata.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
 WHERE
     country = 'US'
     AND campaign = 'whatsnew'
@@ -137,9 +137,7 @@ ORDER BY
 Additional usage criteria may be added in the future as new columns named
 `*_*mau`, etc. where the prefix describes the usage criterion.
 
-For convenience and clarity, we make the exact data presented in the
-[2019 Key Performance Indicator Dashboard](https://dbc-caf9527b-e073.cloud.databricks.com/#job/1160/run/latestSuccess/dashboard/42765b23-7b69-4d59-b08b-ea9cf45b63df)
-available as views that do not require any aggregation:
+For convenience and clarity, we make the exact data presented in the [Key Performance Indicator Dashboard](https://go.corp.mozilla.com/kpi-dash) available as views that do not require any aggregation:
 
 - `firefox_desktop_exact_mau28_v1`,
 - `firefox_nondesktop_exact_mau28_v1`, and
@@ -147,13 +145,13 @@ available as views that do not require any aggregation:
 
 An example query for desktop:
 
-```
+```sql
 SELECT
     submission_date,
     mau,
     tier1_mau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_desktop_exact_mau28_v1`
+    mozdata.telemetry.firefox_desktop_exact_mau28_v1
 ```
 
 These views contain no dimensions and abstract away the detail that FxA
@@ -170,12 +168,12 @@ In the Exact MAU datasets, country is a dimension that would normally be specifi
 in a slice definition.
 Indeed, for desktop and non-desktop clients, the definition of "Tier 1 MAU" looks like:
 
-```
+```sql
 SELECT
     submission_date,
     SUM(mau) AS mau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1`
+    mozdata.telemetry.firefox_desktop_exact_mau28_by_dimensions_v1
 WHERE
     country IN ('US', 'UK', 'DE', 'FR', 'CA')
 GROUP BY
@@ -196,12 +194,12 @@ even a single FxA event originating from a tier 1 country in the 28 day MAU wind
 That calculation requires a separate "FxA Seen in Tier 1 Country" criterion
 and is represented in the exact MAU table as `seen_in_tier1_country_mau`:
 
-```
+```sql
 SELECT
     submission_date,
     SUM(seen_in_tier1_country_mau) AS tier1_mau
 FROM
-    `moz-fx-data-derived-datasets.telemetry.firefox_accounts_exact_mau28_by_dimensions_v1`
+    mozdata.telemetry.firefox_accounts_exact_mau28_by_dimensions_v1
 GROUP BY
     submission_date
 ORDER BY
@@ -224,22 +222,3 @@ of variation and assign a confidence interval to our sums.
 As an example of calculating confidence intervals, see the
 [Desktop MAU KPI query in STMO](https://sql.telemetry.mozilla.org/queries/61957/source)
 which uses a jackknife resampling technique implemented as a BigQuery UDF.
-
-# Data Reference
-
-## Scheduling
-
-These tables are updated daily via the
-[parquet to BigQuery](https://github.com/mozilla-services/spark-parquet-to-bigquery)
-infrastructure in the following DAGs:
-
-- [`reprocess_clients_daily_v6` DAG](https://github.com/mozilla-services/spark-parquet-to-bigquery/blob/master/dags/reprocess_clients_daily_v6.py),
-- [`incremental_telemetry_core_parquet_v3` DAG](https://github.com/mozilla-services/spark-parquet-to-bigquery/blob/master/dags/incremental_telemetry_core_parquet_v3.py), and
-- [`incremental_fxa_events_v1` DAG](https://github.com/mozilla-services/spark-parquet-to-bigquery/blob/master/dags/incremental_fxa_events_v1.py).
-
-## Schema
-
-The data is partitioned by `submission_date`.
-
-As of 2019-03-29, the current version for all Exact MAU tables is `v1`,
-and the schemas are visible via the `telemetry` dataset in [the BigQuery console](https://console.cloud.google.com/bigquery?project=moz-fx-data-derived-datasets&folder&organizationId=442341870013&p=moz-fx-data-derived-datasets&d=telemetry&page=dataset).

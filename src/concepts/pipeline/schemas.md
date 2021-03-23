@@ -1,15 +1,14 @@
 # Generated Schemas
 
+<!-- toc -->
+
 ## Overview
 
 Schemas describe the structure of ingested data. They are used in the pipeline to validate the types
-and values of data, and to define a table schema in a data store. We use a repository of JSON Schemas
-to sort incoming data into [`decoded` and `error`
-datasets](../../cookbooks/bigquery/querying.md#projects-with-bigquery-datasets). We also generate BigQuery
-table schemas nightly from the JSON Schemas.
-
-This section is intended for those who want to modify the process of generating and applying schemas
-in various components of the data pipeline.
+and values of data, and to define a table schema in a data store. We use a repository of JSON
+Schemas to sort incoming data into [`decoded` and `error` datasets][bq-datasets]. We also generate
+BigQuery table schemas on business days from the JSON Schemas: you can see the current status of
+this job on the [`mozilla-pipeline-schemas` deploy dashboard][mps-deploys].
 
 ```mermaid
 graph TD
@@ -53,6 +52,53 @@ ingestion --> |inserts into| bigquery
 
 **Figure**: _An overview of generated schemas. Click on a node to navigate to the relevant
 repository or documentation._
+
+## Schema deploys FAQ
+
+This section answers some basic questions about the schema deployment pipeline.
+
+### How do I make changes to a schema?
+
+This is dependent on what application you are working on.
+
+If you are working on Firefox Telemetry and are adding a new probe, then you don't have to do
+anything. Changes are automatically picked up by the [`probe-scraper`][probe-scraper] from the
+`histograms.json` and `scalars.yaml` files in `mozilla-central`. Non-probe changes (for example,
+modifications to the telemetry environment) will require you to make changes to
+[`mozilla-pipeline-schemas`][mps].
+
+If you are working on an application using the [Glean SDK](../glean/glean.md), then the
+probe-scraper will automatically pick up changes from `metrics.yaml`.
+
+### When will I see new changes to the schema?
+
+Schema deploys happen on business days around UTC+04 when new changes are found in the
+[`generated-schemas` branch of `mozilla-pipeline-schemas`][generated-schemas]. This means that any
+changes merged after UTC+04 on Friday will not propagate until Monday UTC+04. See the
+[`mozilla-pipeline-schemas` deploy][mps-deploys] dashboard for up-to-date information on the most
+recent deploys.
+
+### What does it mean when a schema deploy is blocked?
+
+The schema deployment pipeline has a hard dependency on the [`probe-scraper`], a service that scours
+repositories for new metrics to include in generated schemas. When the probe-scraper fails, it will
+prevent the [`mozilla-schema-generator`][msg] from running. If there are new changes to the main
+branch of `mozilla-pipeline-schemas`, then they will not be added to the `generated-schemas` branch
+until the failure has been resolved. Similarly, new probes and pings in either Telemetry or Glean
+will not be picked up until the `probe-scraper` failures are resolved.
+
+If a new schema field is not registered in the schema repository before collection begins, it will
+be available in the `additional_properties` field of the generated table. If a new schema for a ping
+is not registered before collection begins, then it will be sorted into the error stream. Please
+[file a bug](../reporting_a_problem.md) or [reach out](../getting_help.md) if you believe your data
+may be affected by blocked schema deploys.
+
+[bq-datasets]: ../../cookbooks/bigquery/querying.md#projects-with-bigquery-datasets
+[mps-deploys]: https://protosaur.dev/mps-deploys/
+[mps]: https://github.com/mozilla-services/mozilla-pipeline-schemas
+[generated-schemas]: https://github.com/mozilla-services/mozilla-pipeline-schemas/tree/generated-schema
+[msg]: https://github.com/mozilla/mozilla-schema-generator
+[probe-scraper]: https://github.com/mozilla/probe-scraper
 
 ## Schema Repository
 
@@ -148,21 +194,21 @@ WHERE
 LIMIT 5
 ```
 
-Column | Example Value | Notes
--|-|-
-`document_namespace` | telemetry |
-`document_type` | main |
-`document_version` | null | The version in the `telemetry` namespace is generated after validation
-`error_message` | `org.everit.json.schema.ValidationException: #/environment/system/os/version: #: no subschema matched out of the total 1 subschemas`
-`error_type` | `ParsePayload` | The `ParsePayload` type is associated with schema validation or corrupt data
-`exception_class` | `org.everit.json.schema.ValidationException `| Java [JSON Schema Validator](https://github.com/everit-org/json-schema) library
-`job_name` | `decoder-0-0121192636-9c56ac6a` | Name of the Dataflow job that can be used to determine the version of the schema artifact
+| Column               | Example Value                                                                                                                        | Notes                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `document_namespace` | telemetry                                                                                                                            |
+| `document_type`      | main                                                                                                                                 |
+| `document_version`   | null                                                                                                                                 | The version in the `telemetry` namespace is generated after validation                    |
+| `error_message`      | `org.everit.json.schema.ValidationException: #/environment/system/os/version: #: no subschema matched out of the total 1 subschemas` |
+| `error_type`         | `ParsePayload`                                                                                                                       | The `ParsePayload` type is associated with schema validation or corrupt data              |
+| `exception_class`    | `org.everit.json.schema.ValidationException `                                                                                        | Java [JSON Schema Validator](https://github.com/everit-org/json-schema) library           |
+| `job_name`           | `decoder-0-0121192636-9c56ac6a`                                                                                                      | Name of the Dataflow job that can be used to determine the version of the schema artifact |
 
 ### Decoding
 
 The BigQuery schemas are used to normalize relevant payload data and determine additional
 properties. Normalization involves renaming field names and transforming certain types of data.
-Snake casing is employed across all schemas and ensures a consistent querying experience.  Some data
+Snake casing is employed across all schemas and ensures a consistent querying experience. Some data
 must be transformed before insertion, such as map-types (a.k.a. dictionaries in Python), due to
 limitations in BigQuery data representation. Other data may not be specified in the schema, and
 instead placed into a specially constructed column named `additional_properties`.
@@ -202,13 +248,13 @@ accommodate BigQuery limitations in data representation. All transformations are
 
 The following transformations are currently applied:
 
-Transformation | Description
--|-
-Map Types | JSON objects that contain an unbounded number of keys with a shared value type are represented as a [repeated structure containing a `key` and `value` column](../../cookbooks/bigquery/querying.md#accessing-map-like-fields).
-Nested Arrays | Nested lists are represented using a structure containing a repeated `list` column.
-Tuples to Anonymous Structures | A [tuple of items](https://json-schema.org/understanding-json-schema/reference/array.html#tuple-validation) is represented as an anonymous structure with column names starting at `_0` up to `_{n}` where `n` is the length of the tuple.
-JSON to String coercion | A sub-tree in a JSON document will be coerced to string if specified in the BigQuery schema. One example is of transformation is to [represent histograms in the main ping](../../cookbooks/bigquery/querying.md#accessing-histograms).
-Boolean to Integer coercion | A boolean may be cast into an integer type.
+| Transformation                 | Description                                                                                                                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Map Types                      | JSON objects that contain an unbounded number of keys with a shared value type are represented as a [repeated structure containing a `key` and `value` column](../../cookbooks/bigquery/querying.md#accessing-map-like-fields).            |
+| Nested Arrays                  | Nested lists are represented using a structure containing a repeated `list` column.                                                                                                                                                        |
+| Tuples to Anonymous Structures | A [tuple of items](https://json-schema.org/understanding-json-schema/reference/array.html#tuple-validation) is represented as an anonymous structure with column names starting at `_0` up to `_{n}` where `n` is the length of the tuple. |
+| JSON to String coercion        | A sub-tree in a JSON document will be coerced to string if specified in the BigQuery schema. One example is of transformation is to [represent histograms in the main ping](../../cookbooks/bigquery/querying.md#accessing-histograms).    |
+| Boolean to Integer coercion    | A boolean may be cast into an integer type.                                                                                                                                                                                                |
 
 Additional properties are fields within the ingested JSON document that are not found in the schema.
 When all transformations are completed, any fields that were not traversed in the schema will be
@@ -246,7 +292,7 @@ The `schema_id` is derived from the value of the `$schema` property of each JSON
 The `schemas_build_id` label contains an identifier that includes the timestamp of the generated schema.
 This label may be used to trace the last deployed commit from `generated-schemas`.
 
-### Triggering `generated-schemas` push with Airflow
+### Updating generated-schemas
 
 ```mermaid
 graph TD
@@ -280,7 +326,7 @@ It may also change when the `master` branch contains new or updated schemas unde
 To manually trigger a new push, clear the state of a single task in the workflow admin UI.
 To update the schedule and dependencies, update the DAG definition.
 
-### Modifying state of the pipeline
+### Deploying schemas to production
 
 ```mermaid
 graph TD
